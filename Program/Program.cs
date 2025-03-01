@@ -2,21 +2,21 @@
 
 namespace HuffmanCodingExample
 {
-    // Node class for Huffman Tree
+    // Node class for n-ary Huffman Tree
     public class HuffmanNode
     {
-        public char? Symbol { get; set; } // Nullable char for non-leaf nodes
+        public char? Symbol { get; set; } // Actual symbol for leaves; null for internal/dummy nodes.
         public int Frequency { get; set; }
-        public HuffmanNode Left { get; set; }
-        public HuffmanNode Right { get; set; }
+        public List<HuffmanNode> Children { get; set; }
 
         // A node is a leaf if it has no children.
-        public bool IsLeaf => Left == null && Right == null;
+        public bool IsLeaf => Children == null || Children.Count == 0;
 
         public HuffmanNode(char? symbol, int frequency)
         {
             Symbol = symbol;
             Frequency = frequency;
+            Children = new List<HuffmanNode>();
         }
     }
 
@@ -24,11 +24,20 @@ namespace HuffmanCodingExample
     {
         private HuffmanNode _root;
         private Dictionary<char, string> _codes = new Dictionary<char, string>();
+        private int _n; // n-ary branching factor
 
-        // Build the Huffman Tree for the input text.
+        // Constructor to specify the value of n.
+        public HuffmanCoding(int n)
+        {
+            if (n < 2)
+                throw new ArgumentException("n must be at least 2.");
+            _n = n;
+        }
+
+        // Build the n-ary Huffman tree for the given text.
         public void Build(string text)
         {
-            // Build a frequency table for each character.
+            // Build frequency table.
             var frequency = new Dictionary<char, int>();
             foreach (char c in text)
             {
@@ -39,59 +48,82 @@ namespace HuffmanCodingExample
 
             PrintFrequencyTable(frequency);
 
-            // Create a list of Huffman nodes.
+            // Create initial nodes for each character.
             var nodes = new List<HuffmanNode>();
             foreach (var kvp in frequency)
             {
                 nodes.Add(new HuffmanNode(kvp.Key, kvp.Value));
             }
 
-            // Combine nodes until only one tree remains.
+            // Special case: if only one unique symbol, assign code "0" directly.
+            if (nodes.Count == 1)
+            {
+                _root = nodes[0];
+                _codes[_root.Symbol.Value] = "0";
+                return;
+            }
+
+            // Padding: add dummy nodes (with frequency 0) so that 
+            // (number_of_leaves - 1) mod (n - 1) == 0.
+            int k = nodes.Count;
+            int remainder = (k - 1) % (_n - 1);
+            if (remainder != 0)
+            {
+                int dummyCount = (_n - 1) - remainder;
+                for (int i = 0; i < dummyCount; i++)
+                {
+                    // Dummy nodes have null symbol and frequency 0.
+                    nodes.Add(new HuffmanNode(null, 0));
+                }
+            }
+
+            // Combine nodes until one tree remains.
             while (nodes.Count > 1)
             {
-                // Sort the nodes by frequency.
-                nodes = nodes.OrderBy(n => n.Frequency).ToList();
-                HuffmanNode left = nodes[0];
-                HuffmanNode right = nodes[1];
+                // Sort nodes by frequency.
+                nodes = nodes.OrderBy(node => node.Frequency).ToList();
+                // Take the n nodes with the smallest frequencies.
+                List<HuffmanNode> children = nodes.Take(_n).ToList();
+                nodes.RemoveRange(0, _n);
 
-                // Create a new parent node with the two smallest frequencies.
-                HuffmanNode parent = new HuffmanNode(null, left.Frequency + right.Frequency)
-                {
-                    Left = left,
-                    Right = right
-                };
+                // Create a new parent node with frequency equal to the sum.
+                int sumFrequency = children.Sum(child => child.Frequency);
+                HuffmanNode parent = new HuffmanNode(null, sumFrequency);
+                parent.Children.AddRange(children);
 
-                // Remove the two nodes and add their parent.
-                nodes.Remove(left);
-                nodes.Remove(right);
+                // Add the new parent node back to the list.
                 nodes.Add(parent);
             }
 
+            // The remaining node is the root of the Huffman tree.
             _root = nodes[0];
 
-            // Generate the codes by traversing the Huffman tree.
+            // Generate codes by traversing the tree.
             GenerateCodes(_root, "");
         }
 
-        // Recursively build the code table.
+        // Recursively traverse the n-ary tree to generate codes.
         private void GenerateCodes(HuffmanNode node, string code)
         {
             if (node == null)
                 return;
 
-            // When we reach a leaf node, store the code for that symbol.
+            // If we reach a leaf node and it represents a valid symbol, assign its code.
             if (node.IsLeaf)
             {
-                _codes[node.Symbol.Value] = code;
+                if (node.Symbol.HasValue)
+                    _codes[node.Symbol.Value] = string.IsNullOrEmpty(code) ? "0" : code;
+                return;
             }
-            else
+
+            // For each child, append the index (as a digit) to the current code.
+            for (int i = 0; i < node.Children.Count; i++)
             {
-                GenerateCodes(node.Left, code + "0");
-                GenerateCodes(node.Right, code + "1");
+                GenerateCodes(node.Children[i], code + i.ToString());
             }
         }
 
-        // Encode the input text into a Huffman encoded string.
+        // Encode the input text using the generated n-ary Huffman codes.
         public string Encode(string text)
         {
             string encoded = "";
@@ -102,19 +134,29 @@ namespace HuffmanCodingExample
             return encoded;
         }
 
-        // Decode the Huffman encoded string back to the original text.
+        // Decode the n-ary Huffman encoded string back to the original text.
         public string Decode(string encodedText)
         {
             string decoded = "";
             HuffmanNode current = _root;
-            foreach (char bit in encodedText)
+            foreach (char digit in encodedText)
             {
-                current = (bit == '0') ? current.Left : current.Right;
+                // Convert the digit character into an index.
+                int index = digit - '0';  // Assumes _n is small enough that single digits suffice.
+                if (current.Children != null && index < current.Children.Count)
+                {
+                    current = current.Children[index];
+                }
+                else
+                {
+                    throw new Exception("Invalid encoded digit or tree structure.");
+                }
 
-                // When we hit a leaf node, append the symbol and reset for next code.
+                // When a leaf is reached, append its symbol (if valid) and reset to the root.
                 if (current.IsLeaf)
                 {
-                    decoded += current.Symbol.Value;
+                    if (current.Symbol.HasValue)
+                        decoded += current.Symbol.Value;
                     current = _root;
                 }
             }
@@ -150,13 +192,16 @@ namespace HuffmanCodingExample
             Console.WriteLine("Eingabe:");
             string text = Console.ReadLine() ?? throw new Exception("Empty input");
 
+            Console.WriteLine("\nn:");
+            int n = Convert.ToInt32(Console.ReadLine() ?? throw new Exception("Empty input"));
+
             if (File.Exists(text))
                 text = File.ReadAllText(text);
 
             Console.WriteLine("\nKlartext: " + text);
 
             // Create HuffmanCoding instance and build tree.
-            HuffmanCoding huffman = new HuffmanCoding();
+            HuffmanCoding huffman = new HuffmanCoding(n);
             huffman.Build(text);
 
             // Display the codes for each character.
@@ -164,7 +209,6 @@ namespace HuffmanCodingExample
 
             // Encode the text.
             string encoded = huffman.Encode(text);
-
             
             Console.WriteLine("\nKodierter Text: " + encoded);
 
